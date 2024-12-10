@@ -1,127 +1,92 @@
-
+from dotenv import load_dotenv  # Add this import to load the .env file
 import os
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import openai
-from sklearn.cluster import KMeans
 
-# Set your OpenAI API key
-#openai.api_key = ""
-import os
 
-os.environ["OPENAI_API_KEY"] = "API_KEY"
 
-from google.colab import files
-import pandas as pd
+# Load environment variables from the .env file
+load_dotenv()
 
-# Upload your CSV file
-uploaded = files.upload()
+# Get the API key from the environment variable
+openai.api_key = os.getenv("AIPROXY_TOKEN")  # This will now use the token from the .env file
 
-# Load the CSV into a Pandas DataFrame
-filename = list(uploaded.keys())[0]
-df = pd.read_csv(filename)
-print(f"Dataset loaded: {filename}")
+def read_csv(filename):
+    """Read the CSV file and return a DataFrame."""
+    try:
+        df = pd.read_csv(filename, encoding="utf-8")
+        print(f"Dataset loaded: {filename}")
+        return df
+    except UnicodeDecodeError:
+        print(f"Encoding issue detected with {filename}. Trying 'latin1'.")
+        return pd.read_csv(filename, encoding="latin1")
+    except Exception as e:
+        print(f"Error loading {filename}: {e}")
+        exit()
 
 def analyze_data(df):
     """Perform basic analysis on the dataset."""
-    analysis = {
-        "shape": df.shape,
-        "columns": df.columns.tolist(),
-        "missing_values": df.isnull().sum().to_dict(),
-        "summary_statistics": df.describe(include="all").to_dict()}
+    analysis = {}
+    analysis["shape"] = df.shape
+    analysis["columns"] = df.columns.tolist()
+    analysis["missing_values"] = df.isnull().sum().to_dict()
+    analysis["summary_statistics"] = df.describe(include="all").to_dict()
     return analysis
-
-analysis = analyze_data(df)
-print(analysis)
-
-def advanced_analysis(df):
-    """Perform advanced analyses like outlier detection and clustering."""
-    insights = {}
-
-    # Outlier detection using IQR
-    numeric_columns = df.select_dtypes(include=["number"]).columns
-    if not numeric_columns.empty:
-        outliers = {}
-        for col in numeric_columns:
-            q1 = df[col].quantile(0.25)
-            q3 = df[col].quantile(0.75)
-            iqr = q3 - q1
-            outliers[col] = ((df[col] < (q1 - 1.5 * iqr)) | (df[col] > (q3 + 1.5 * iqr))).sum()
-        insights["outliers"] = outliers
-
-    # Clustering using KMeans (if applicable)
-    if len(numeric_columns) > 1:
-        kmeans = KMeans(n_clusters=3, random_state=42).fit(df[numeric_columns].dropna())
-        insights["clusters"] = pd.Series(kmeans.labels_).value_counts().to_dict()
-
-    return insights
-
-advanced = advanced_analysis(df)
-print(advanced)
 
 def visualize_data(df, output_prefix):
     """Generate visualizations for the dataset."""
     charts = []
-
-    # Correlation Heatmap
+    
+    # Example 1: Correlation Heatmap (if numeric data exists)
     numeric_columns = df.select_dtypes(include=["number"]).columns
-    if not numeric_columns.empty:
-        plt.figure(figsize=(5.12, 5.12))
-        sns.heatmap(df[numeric_columns].corr(), annot=True, cmap="coolwarm")
+    if len(numeric_columns) > 0:
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(df[numeric_columns].corr(), annot=True, cmap="coolwarm", fmt=".2f")
         heatmap_file = f"{output_prefix}_heatmap.png"
-        plt.savefig(heatmap_file, dpi=300)
+        plt.savefig(heatmap_file)
         charts.append(heatmap_file)
         plt.close()
 
-    # Bar Plot for the first categorical column
+    # Example 2: Bar Plot for the first categorical column
     categorical_columns = df.select_dtypes(include=["object"]).columns
-    if not categorical_columns.empty:
-        plt.figure(figsize=(5.12, 5.12))
-        df[categorical_columns[0]].value_counts().head(10).plot(kind="bar")
+    if len(categorical_columns) > 0:
+        plt.figure(figsize=(10, 6))
+        df[categorical_columns[0]].value_counts().head(10).plot(kind="bar", color="skyblue")
         barplot_file = f"{output_prefix}_barplot.png"
-        plt.savefig(barplot_file, dpi=300)
+        plt.savefig(barplot_file)
         charts.append(barplot_file)
         plt.close()
 
     return charts
-
-charts = visualize_data(df, "output")
-print("Generated charts:", charts)
-
-import openai
-import os
-
-# Set the API base and your AIPROXY_TOKEN
+openai.api_key = os.getenv("AIPROXY_TOKEN")
 openai.api_base = "https://aiproxy.sanand.workers.dev/openai/v1"
-os.environ["OPENAI_API_KEY"] = "API_KEY"
-def narrate_story(analysis, advanced, charts, filename):
-    """Use GPT to narrate a story about the analysis."""
+def narrate_story(analysis, charts, filename):
+    """Use GPT-4o-Mini to narrate a story about the analysis."""
     summary_prompt = f"""
-    I analyzed a dataset from {filename}. Here are the details:
+    I analyzed a dataset from {filename}. It has the following details:
     - Shape: {analysis['shape']}
     - Columns: {analysis['columns']}
     - Missing Values: {analysis['missing_values']}
     - Summary Statistics: {analysis['summary_statistics']}
-    - Outliers Detected: {advanced.get('outliers', 'Not computed')}
-    - Cluster Analysis: {advanced.get('clusters', 'Not computed')}
 
-    Based on these insights, write a story summarizing the data, key findings, and recommendations. Refer to the charts where necessary.
+    Write a short summary of the dataset, key insights, and recommendations. Refer to the charts where necessary.
     """
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",  # Supported model for chat completion
+            model="gpt-4o-mini",  # Use the specific model
             messages=[{"role": "user", "content": summary_prompt}],
             temperature=0.7
         )
-        return response['choices'][0]['message']['content']
-    except openai.error.OpenAIError as e:
-        return f"An error occurred: {str(e)}"
+        return response.choices[0].message['content']
+    except openai.error.AuthenticationError:
+        return "Authentication failed. Check your token and environment setup."
+    except Exception as e:
+        return f"Story generation failed: {e}"
 
-# Example input
-filename = "example_dataset.csv"  # Replace with your actual filename
-story = narrate_story(analysis, advanced, charts, filename)
-print(story)
+
+
 
 def save_markdown(story, charts, output_file):
     """Save the narrated story and chart references to a README.md file."""
@@ -131,5 +96,44 @@ def save_markdown(story, charts, output_file):
         for chart in charts:
             f.write(f"![Chart](./{chart})\n")
 
-save_markdown(story, charts, "README.md")
-print("Analysis saved to README.md")
+def main():
+    # Define the folder path
+    folder_path = r"C:\Users\aadil\OneDrive\Desktop\aadil\TDS-2"
+
+    # Change to the specified folder
+    try:
+        os.chdir(folder_path)
+    except Exception as e:
+        print(f"Error accessing folder {folder_path}: {e}")
+        return
+    
+    # Automatically process all CSV files in the folder
+    csv_files = [f for f in os.listdir() if f.endswith('.csv')]
+    
+    if not csv_files:
+        print("No CSV files found in the directory.")
+        return
+    
+    for filename in csv_files:
+        print(f"Processing {filename}...")
+        
+        # Load dataset
+        df = read_csv(filename)
+        
+        # Analyze dataset
+        analysis = analyze_data(df)
+        
+        # Visualize data
+        output_prefix = filename.split(".")[0]
+        charts = visualize_data(df, output_prefix)
+        
+        # Narrate story
+        story = narrate_story(analysis, charts, filename)
+        
+        # Save README.md
+        readme_file = f"README_{output_prefix}.md"
+        save_markdown(story, charts, readme_file)
+        print(f"Analysis completed for {filename}. Check {readme_file} and charts.")
+
+if __name__ == "__main__":
+    main()
